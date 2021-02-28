@@ -1,37 +1,69 @@
 use piston::input::*;
-use opengl_graphics::{GlGraphics, OpenGL};
-
+use opengl_graphics::GlGraphics;
 use rand::Rng;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Tp {
-    Dead = 0,
-    Alive = 1,
+#[derive(Clone, Copy, Debug)]
+pub enum Flora {
+    Mineral,
+    Sunbeam,
+    Organic,
+    Empty,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub struct Cell {
-    tp: Tp,
-    age: u32,
+    flora: Flora,
+    energy: u32,
+    //color converter https://doc.instantreality.org/tools/color_calculator/
+    color: [f32; 4],
 }
 
 impl Cell {
-    fn new(t: Tp) -> Cell {
-        let mut rng = rand::thread_rng();
-
-        Cell {
-            age: rng.gen::<u8>() as u32,
-            tp: t
+    fn new(c_flora: Flora) -> Cell {
+        match c_flora {
+            Flora::Sunbeam =>
+                Cell{
+                    flora: c_flora,
+                    energy: 5,
+                    color: [0.12, 0.51, 0.295, 1.0]
+                },
+            Flora::Mineral =>
+                Cell{
+                    flora: c_flora,
+                    energy: 10,
+                    color: [0.2, 0.59, 0.86, 1.0]
+                },
+            Flora::Organic =>
+                Cell{
+                    flora: c_flora,
+                    energy: 10,
+                    color: [0.9, 0.295, 0.235, 1.0]
+                },
+            Flora::Empty =>
+                Cell{
+                    flora: c_flora,
+                    energy: 0,
+                    color: [1.0, 1.0, 1.0, 1.0]
+                },
         }
     }
 
-    fn age_decrement(&mut self) {
-        if self.age > 0 {
-            self.age -= 1;
+    fn energy_increment(&mut self) {
+        if self.energy > 0 {
+            self.energy += 1;
         }
+    }
+
+    pub fn destroy(&mut self) {
+        self.energy = 0;
+    }
+
+    pub fn get_energy(&mut self) -> u32 {
+        self.energy
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Universe {
     width: u32,
     height: u32,
@@ -39,14 +71,23 @@ pub struct Universe {
 }
 
 impl Universe {
-    pub(crate) fn new(w: u32, h: u32) -> Universe {
+    pub fn new(w: u32, h: u32) -> Universe {
 
-        let field = (0..w * h)
-            .map(|i| {
-                if i % 2 == 0 {
-                    Cell::new(Tp::Alive)
+        let length = w * h;
+
+        let field = (0..length)
+            .map(|_| {
+
+                let x = rand::thread_rng().gen::<u32>();
+
+                if x % 3 == 0 {
+                    Cell::new(Flora::Sunbeam)
+                } else if x % 7 == 0  {
+                    Cell::new(Flora::Organic)
+                } else if x % 9 == 0  {
+                    Cell::new(Flora::Mineral)
                 } else {
-                    Cell::new(Tp::Dead)
+                    Cell::new(Flora::Empty)
                 }
             })
             .collect();
@@ -62,31 +103,24 @@ impl Universe {
         (row * self.width + column) as usize
     }
 
-    pub(crate) fn render(&self, gl: &mut GlGraphics, args: &RenderArgs, rectangle_x: u32, rectangle_y: u32, rectangle_size: u32) {
+    pub fn render(&self, gl: &mut GlGraphics, args: &RenderArgs, rectangle_x: u32, rectangle_y: u32, rectangle_size: u32) {
 
         for row in 0..self.height {
             for col in 0..self.width {
                 let idx = self.get_index(row, col);
-                let mut cell = self.cells[idx];
+                let cell = self.cells[idx];
 
-                cell.age_decrement();
+                //cell.energy_increment();
 
-                let square = graphics::rectangle::square((row * rectangle_x) as f64, (col * rectangle_y) as f64, rectangle_size as f64);
+                let square = graphics::rectangle::square(
+                    (row * rectangle_x) as f64,
+                    (col * rectangle_y) as f64,
+                    rectangle_size as f64);
 
-                match cell.tp {
-                    Tp::Alive =>
-                        gl.draw(args.viewport(), |c, gl| {
-                            let transform = c.transform;
-
-                            graphics::rectangle([125.0, 0.0, 0.0, 1.0], square, transform, gl);
-                        }),
-                    Tp::Dead =>
-                        gl.draw(args.viewport(), |c, gl| {
-                            let transform = c.transform;
-
-                            graphics::rectangle([0.0, 125.0, 0.0, 1.0], square, transform, gl);
-                        }),
-                }
+                gl.draw(args.viewport(), |c, gl| {
+                    let transform = c.transform;
+                    graphics::rectangle(cell.color, square, transform, gl);
+                });
             }
         }
     }
