@@ -1,66 +1,10 @@
 use piston::input::*;
 use opengl_graphics::GlGraphics;
-use rand::Rng;
 
-#[derive(Clone, Copy, Debug)]
-pub enum Flora {
-    Mineral,
-    Sunbeam,
-    Organic,
-    Empty,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Cell {
-    flora: Flora,
-    energy: u32,
-    //color converter https://doc.instantreality.org/tools/color_calculator/
-    color: [f32; 4],
-}
-
-impl Cell {
-    fn new(c_flora: Flora) -> Cell {
-        match c_flora {
-            Flora::Sunbeam =>
-                Cell{
-                    flora: c_flora,
-                    energy: 5,
-                    color: [0.12, 0.51, 0.295, 1.0]
-                },
-            Flora::Mineral =>
-                Cell{
-                    flora: c_flora,
-                    energy: 10,
-                    color: [0.2, 0.59, 0.86, 1.0]
-                },
-            Flora::Organic =>
-                Cell{
-                    flora: c_flora,
-                    energy: 10,
-                    color: [0.9, 0.295, 0.235, 1.0]
-                },
-            Flora::Empty =>
-                Cell{
-                    flora: c_flora,
-                    energy: 0,
-                    color: [1.0, 1.0, 1.0, 1.0]
-                },
-        }
-    }
-
-    fn energy_increment(&mut self) {
-        if self.energy > 0 {
-            self.energy += 1;
-        }
-    }
-
-    pub fn destroy(&mut self) {
-        self.energy = 0;
-    }
-
-    pub fn get_energy(&mut self) -> u32 {
-        self.energy
-    }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cell {
+    Dead = 0,
+    Alive = 1,
 }
 
 #[derive(Clone, Debug)]
@@ -71,46 +15,65 @@ pub struct Universe {
 }
 
 impl Universe {
+
     pub fn new(w: u32, h: u32) -> Universe {
+        let width = w;
+        let height = h;
 
-        let length = w * h;
-
-        let field = (0..length)
-            .map(|_| {
-
-                let x = rand::thread_rng().gen::<u32>();
-
-                if x % 3 == 0 {
-                    Cell::new(Flora::Sunbeam)
-                } else if x % 7 == 0  {
-                    Cell::new(Flora::Organic)
-                } else if x % 9 == 0  {
-                    Cell::new(Flora::Mineral)
+        let cells = (0..width * height)
+            .map(|i| {
+                if i % 2 == 0 || i % 7 == 0 {
+                    Cell::Alive
                 } else {
-                    Cell::new(Flora::Empty)
+                    Cell::Dead
                 }
             })
             .collect();
 
-        Universe{
-            width: w,
-            height: h,
-            cells: field
+        Universe {
+            width,
+            height,
+            cells,
         }
     }
 
-    fn get_index(&self, row: u32, column: u32) -> usize {
+    pub fn get_index(&self, row: u32, column: u32) -> usize {
         (row * self.width + column) as usize
     }
 
-    pub fn render(&self, gl: &mut GlGraphics, args: &RenderArgs, rectangle_x: u32, rectangle_y: u32, rectangle_size: u32) {
+    pub fn render(&mut self, gl: &mut GlGraphics, args: &RenderArgs, rectangle_x: u32, rectangle_y: u32, rectangle_size: u32) {
+
+        let mut next = self.cells.clone();
 
         for row in 0..self.height {
             for col in 0..self.width {
                 let idx = self.get_index(row, col);
                 let cell = self.cells[idx];
 
-                //cell.energy_increment();
+                let live_neighbors = self.live_neighbor_count(row, col);
+
+                let next_cell = match (cell, live_neighbors) {
+                    // Rule 1: Any live cell with fewer than two live neighbours
+                    // dies, as if caused by underpopulation.
+                    (Cell::Alive, x) if x < 2 => Cell::Dead,
+                    // Rule 2: Any live cell with two or three live neighbours
+                    // lives on to the next generation.
+                    (Cell::Alive, 2) | (Cell::Alive, 3) => Cell::Alive,
+                    // Rule 3: Any live cell with more than three live
+                    // neighbours dies, as if by overpopulation.
+                    (Cell::Alive, x) if x > 3 => Cell::Dead,
+                    // Rule 4: Any dead cell with exactly three live neighbours
+                    // becomes a live cell, as if by reproduction.
+                    (Cell::Dead, 3) => Cell::Alive,
+                    // All other cells remain in the same state.
+                    (otherwise, _) => otherwise,
+                };
+
+                let color = if cell == Cell::Alive {
+                    [0.12, 0.51, 0.295, 1.0]
+                } else {
+                    [0.2, 0.59, 0.86, 1.0]
+                };
 
                 let square = graphics::rectangle::square(
                     (row * rectangle_x) as f64,
@@ -119,13 +82,30 @@ impl Universe {
 
                 gl.draw(args.viewport(), |c, gl| {
                     let transform = c.transform;
-                    graphics::rectangle(cell.color, square, transform, gl);
+                    graphics::rectangle(color, square, transform, gl);
                 });
+
+                next[idx] = next_cell;
             }
         }
+
+        self.cells = next;
     }
 
-    fn update(&mut self) {
-        println!("ewe");
+    fn live_neighbor_count(&self, row: u32, column: u32) -> u8 {
+        let mut count = 0;
+        for delta_row in [self.height - 1, 0, 1].iter().cloned() {
+            for delta_col in [self.width - 1, 0, 1].iter().cloned() {
+                if delta_row == 0 && delta_col == 0 {
+                    continue;
+                }
+
+                let neighbor_row = (row + delta_row) % self.height;
+                let neighbor_col = (column + delta_col) % self.width;
+                let idx = self.get_index(neighbor_row, neighbor_col);
+                count += self.cells[idx] as u8;
+            }
+        }
+        count
     }
 }
